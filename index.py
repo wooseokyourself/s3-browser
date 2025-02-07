@@ -4,7 +4,7 @@ import bs4
 from urllib.parse import quote, unquote
 import os
 
-def getFilesAndFolderOfBucket(strBucket,strPrefix):
+def getFilesAndFolderOfBucket(strBucket, strPrefix):
     conn = client('s3')
     sesFolder = conn.list_objects(Bucket=strBucket, Prefix=strPrefix, Delimiter='/')
     vecFiles = []
@@ -21,16 +21,20 @@ def getFilesAndFolderOfBucket(strBucket,strPrefix):
 
     return (vecFiles,vecFolders)
 
-def uploadIndexFile(strBucket,strPrefix,strIndexFile):
+def uploadIndexFile(strBucket, strPrefix, strIndexFile):
     s3 = boto3.resource('s3')
     bucket = s3.Bucket(strBucket)
     bucket.upload_file(strIndexFile, strPrefix + strIndexFile,
-                       ExtraArgs={'ACL': 'public-read', 'ContentType': 'text/html'})
+                      ExtraArgs={'ACL': 'public-read', 
+                                'ContentType': 'text/html; charset=utf-8'}) 
 
-def generateIndexFile(strBucket,strPrefix,strIndexFile,vecFiles,vecFolders,strTemplate):
-    with open(strTemplate) as inf:
+def generateIndexFile(strBucket, strPrefix, strIndexFile, vecFiles, vecFolders, strTemplate):
+    with open(strTemplate, encoding='utf-8') as inf: 
         txt = inf.read()
-        soup = bs4.BeautifulSoup(txt)
+        soup = bs4.BeautifulSoup(txt, 'html.parser') 
+    
+    meta_tag = soup.new_tag("meta", charset="utf-8")
+    soup.head.insert(0, meta_tag)
 
     tagKeysList = soup.find("ul", {"id": "listkeys"})
     tagKeysList.append(generateHeader(soup, strBucket, strPrefix))
@@ -43,23 +47,25 @@ def generateIndexFile(strBucket,strPrefix,strIndexFile,vecFiles,vecFolders,strTe
 
     for strFolder in vecFolders:
         strFolderLast = unquote(strFolder.split('/')[-2])
-        tagKeysList.append(generateElement(soup, True, strFolderLast, '/' + strFolder + 'index.html'))
+        if (strFolderLast[0] != '.'): 
+            tagKeysList.append(generateElement(soup, True, strFolderLast, '/' + strFolder + 'index.html'))
 
     for strFile in vecFiles:
         strFileLast = unquote(strFile.split('/')[-1])
-        tagKeysList.append(generateElement(soup, False, strFileLast, '/' + strFile))
+        if (strFileLast[0] != '.'): 
+            tagKeysList.append(generateElement(soup, False, strFileLast, '/' + strFile))
 
     with open(strIndexFile, "w", encoding='utf-8') as outf:
-        outf.write(str(soup))
+        outf.write(str(soup.prettify())) 
 
-def recPopulateIndexFiles(strBucket,strPrefix,strTemplate):
+def recPopulateIndexFiles(strBucket, strPrefix, strTemplate):
     (vecFiles, vecFolders) = getFilesAndFolderOfBucket(strBucket, strPrefix)
-    generateIndexFile(strBucket, strPrefix, strIndexFile, vecFiles, vecFolders,strTemplate)
+    generateIndexFile(strBucket, strPrefix, strIndexFile, vecFiles, vecFolders, strTemplate)
     uploadIndexFile(strBucket, strPrefix, strIndexFile)
     for strFolder in vecFolders:
-        recPopulateIndexFiles(strBucket, strFolder,strTemplate)
+        recPopulateIndexFiles(strBucket, strFolder, strTemplate)
 
-def generateElement(soup,flagIsFolder,strText,strURL):
+def generateElement(soup, flagIsFolder, strText, strURL):
     tagLi = soup.new_tag("li", **{'class': 'collection-item'})
     tagDiv = soup.new_tag("div", **{'class': 'valign-wrapper'})
     tagI = soup.new_tag("i", **{'class': 'material-icons iconitem'})
@@ -67,18 +73,18 @@ def generateElement(soup,flagIsFolder,strText,strURL):
         tagI.string = 'folder_open'
     else:
         tagI.string = 'insert_drive_file'
-    encoded_url = quote(strURL)
+    encoded_url = quote(strURL) 
     tagA = soup.new_tag("a", href=encoded_url)
-    tagA.string = strText
+    tagA.string = strText 
     tagDiv.append(tagI)
     tagDiv.append(tagA)
     tagLi.append(tagDiv)
     return tagLi
 
-def generateHeader(soup,strBucket,strPrefix):
+def generateHeader(soup, strBucket, strPrefix):
     tagHeader = soup.new_tag("li", **{'class': 'collection-header'})
-    tagH = soup.new_tag("h4")
-    tagH.string = 's3://' + strBucket + '/' + strPrefix
+    tagH = soup.new_tag("h6")
+    tagH.string = '/' + strPrefix
     tagHeader.append(tagH)
     return tagHeader
 
@@ -87,4 +93,4 @@ strPrefix = ''
 strIndexFile = 'index.html'
 strTemplate = 'index_template.html'
 
-recPopulateIndexFiles(strBucket,strPrefix,strTemplate)
+recPopulateIndexFiles(strBucket, strPrefix, strTemplate)
